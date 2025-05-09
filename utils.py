@@ -94,7 +94,12 @@ async def progress_bar(current, total, reply, start):
                 ("🐬", "🦈"),
                 ("💚", "💛"),
                 ("🌟", "⭐"),
-                ("▰", "▱")
+                ("▰", "▱"),
+                ("📀", "💿"),
+                ("▓", "░"),
+                ("⦿", "◯"),
+                ("◼", "◻"),
+                ("▇", "▃")
             ]
             chosen_pair = random.choice(symbol_pairs)
             completed_symbol, remaining_symbol = chosen_pair
@@ -102,7 +107,7 @@ async def progress_bar(current, total, reply, start):
             progress_bar = completed_symbol * completed_length + remaining_symbol * remaining_length
             
             try:
-                await reply.edit(f'`╭──⌯═════𝐔𝐩𝐥𝐨𝐚𝐝𝐢𝐧𝐠══════⌯──╮\n├⚡ {progress_bar}\n├⚙️ Progress ➤ | {perc} |\n├🚀 Speed ➤ | {sp} |\n├📟 Processed ➤ | {cur} |\n├🧲 Size ➤ | {tot} |\n├🕑 ETA ➤ | {eta} |\n╰─═══✨🦋𝙎𝘼𝙄𝙉𝙄 𝘽𝙊𝙏𝙎🦋✨═══─╯`') 
-                #await reply.edit(f'`╭──⌯═════𝐁𝐨𝐭 𝐒𝐭𝐚𝐭𝐢𝐜𝐬══════⌯──╮\n├⚡ {progress_bar}\n├⚙️ Progress ➤ | {perc} |\n├🚀 Speed ➤ | {sp} |\n├📟 Processed ➤ | {cur} |\n├🧲 Size ➤ | {tot} |\n├🕑 ETA ➤ | {eta} |\n╰─═══✨🦋𝙎𝘼𝙄𝙉𝙄 𝘽𝙊𝙏𝙎🦋✨═══─╯`') 
+                await reply.edit(f'`╭──⌯═════𝐔𝐩𝐥𝐨𝐚𝐝𝐢𝐧𝐠══════⌯──╮\n├⚡ {progress_bar}\n├⚙️ Progress ➤ | {perc} |\n├🚀 Speed ➤ | {sp} |\n├📟 Processed ➤ | {cur} |\n├🧲 Size ➤ | {tot} |\n├🕑 ETA ➤ | {eta} |\n╰─═══ ✨ ℍ𝔸𝕄𝕊𝔸𝔽𝔸ℝ ✨ ═══─╯`') 
+                #await reply.edit(f'`╭──⌯═════𝐁𝐨𝐭 𝐒𝐭𝐚𝐭𝐢𝐜𝐬══════⌯──╮\n├⚡ {progress_bar}\n├⚙️ Progress ➤ | {perc} |\n├🚀 Speed ➤ | {sp} |\n├📟 Processed ➤ | {cur} |\n├🧲 Size ➤ | {tot} |\n├🕑 ETA ➤ | {eta} |\n╰─═══ ✨ ℍ𝔸𝕄𝕊𝔸𝔽𝔸ℝ ═══─╯`') 
             except FloodWait as e:
                 time.sleep(e.x)
