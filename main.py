@@ -189,31 +189,39 @@ async def youtube_to_txt(client, message: Message):
             )
             return
 
-    # Extract the YouTube links
+    # Extract the YouTube links with error handling
     videos = []
     if 'entries' in result:
         for entry in result['entries']:
+            if not entry:  # Skip None entries
+                continue
             video_title = entry.get('title', 'No title')
-            url = entry['url']
-            videos.append(f"{video_title}: {url}")
+            url = entry.get('url')
+            if url:  # Only add entries with valid URLs
+                videos.append(f"{video_title}: {url}")
     else:
         video_title = result.get('title', 'No title')
-        url = result['url']
-        videos.append(f"{video_title}: {url}")
+        url = result.get('url')
+        if url:
+            videos.append(f"{video_title}: {url}")
+
+    if not videos:
+        await message.reply_text("❌ No valid video links found in the provided URL.")
+        return
 
     # Create and save the .txt file with the custom name
     txt_file = os.path.join("downloads", f'{title}.txt')
-    os.makedirs(os.path.dirname(txt_file), exist_ok=True)  # Ensure the directory exists
-    with open(txt_file, 'w') as f:
+    os.makedirs(os.path.dirname(txt_file), exist_ok=True)
+    with open(txt_file, 'w', encoding='utf-8') as f:
         f.write('\n'.join(videos))
 
-    # Send the generated text file to the user with a pretty caption
+    # Send the generated text file to the user
     await message.reply_document(
         document=txt_file,
         caption=f'<a href="{youtube_link}">__**Click Here to Open Link**__</a>\n<pre><code>{title}.txt</code></pre>\n'
     )
 
-    # Remove the temporary text file after sending
+    # Cleanup
     os.remove(txt_file)
 
 
