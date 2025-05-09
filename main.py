@@ -789,7 +789,6 @@ async def text_handler(bot: Client, m: Message):
 
     await editable.delete(True)
 
-    raw_text4 = triumph 
     thumb = "/d"
     count =0
     arg =1
