@@ -292,7 +292,7 @@ async def download_and_decrypt_video(url, cmd, name, key):
             print(f"Failed to decrypt {video_path}.")  
             return None  
 
-async def send_vid(bot: Client, m: Message,cc,filename,thumb,name,prog):
+#async def send_vid(bot: Client, m: Message,cc,filename,thumb,name,prog):
     subprocess.run(f'ffmpeg -i "{filename}" -ss 00:00:10 -vframes 1 "{filename}.jpg"', shell=True)
     await prog.delete (True)
     reply = await m.reply_text(f"**Generate Thumbnail:**\n{name}")
@@ -314,6 +314,70 @@ async def send_vid(bot: Client, m: Message,cc,filename,thumb,name,prog):
         await m.reply_document(filename,caption=cc, progress=progress_bar,progress_args=(reply,start_time))
     
     finally:
+        await reply.delete(True)
+        os.remove(filename)
+        os.remove(f"{filename}.jpg")
+
+        import math
+
+async def send_vid(bot: Client, m: Message, cc, filename, thumb, name, prog):
+    subprocess.run(f'ffmpeg -i "{filename}" -ss 00:00:10 -vframes 1 "{filename}.jpg"', shell=True)
+    await prog.delete(True)
+    reply = await m.reply_text(f"**Generate Thumbnail:**\n{name}")
+    
+    try:
+        thumbnail = f"{filename}.jpg" if thumb == "/d" else thumb
+    except Exception as e:
+        await m.reply_text(str(e))
+        return
+
+    file_size = os.path.getsize(filename)
+    max_size = 1.8 * 1024 * 1024 * 1024  # 1.8 GB in bytes
+
+    if file_size <= max_size:
+        # If under 1.8GB, send normally
+        dur = int(duration(filename))
+        start_time = time.time()
+        try:
+            await m.reply_video(filename, caption=cc, supports_streaming=True, height=720, width=1280,
+                                thumb=thumbnail, duration=dur,
+                                progress=progress_bar, progress_args=(reply, start_time))
+        except Exception:
+            await m.reply_document(filename, caption=cc, progress=progress_bar, progress_args=(reply, start_time))
+        finally:
+            await reply.delete(True)
+            os.remove(filename)
+            os.remove(f"{filename}.jpg")
+    else:
+        # Split video into 1.8GB parts
+        await m.reply_text("Video is too large. Splitting into 1.8GB parts...")
+
+        # Estimate duration per part using average bitrate
+        total_dur = duration(filename)
+        avg_bitrate = file_size / total_dur  # bytes per second
+        target_duration = max_size / avg_bitrate  # seconds per part
+        target_duration = int(target_duration)
+
+        part_number = 1
+        start = 0
+
+        while start < total_dur:
+            part_file = f"{filename}_part{part_number}.mp4"
+            cmd = f'ffmpeg -y -i "{filename}" -ss {start} -t {target_duration} -c copy "{part_file}"'
+            subprocess.run(cmd, shell=True)
+            part_dur = int(duration(part_file))
+            start_time = time.time()
+            try:
+                await m.reply_video(part_file, caption=f"{cc}\n\nPart {part_number}", supports_streaming=True,
+                                    height=720, width=1280, thumb=thumbnail, duration=part_dur,
+                                    progress=progress_bar, progress_args=(reply, start_time))
+            except Exception:
+                await m.reply_document(part_file, caption=f"{cc}\n\nPart {part_number}",
+                                       progress=progress_bar, progress_args=(reply, start_time))
+            os.remove(part_file)
+            part_number += 1
+            start += target_duration
+
         await reply.delete(True)
         os.remove(filename)
         os.remove(f"{filename}.jpg")
