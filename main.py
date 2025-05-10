@@ -315,7 +315,39 @@ async def handle_callback(client, callback_query: CallbackQuery):
         del user_data[user_id]
         await callback_query.answer()
 
-
+@bot.on_message(filters.command(["f2i"]))
+async def file_to_image_handler(client, message: Message):
+    user_id = message.from_user.id
+    await message.reply("📷 Please send a .jpg file")
+    
+    # Listen for the file
+    input_message: Message = await bot.listen(message.chat.id)
+    
+    # Check if a document (file) was sent
+    if not input_message.document:
+        await message.reply("🚨 **Error**: Please send a .jpg file!")
+        return
+    
+    # Check if the file is a .jpg
+    file_name = input_message.document.file_name
+    if not file_name.lower().endswith('.jpg') and not file_name.lower().endswith('.png'):
+        await message.reply("🚨 **Error**: Only .jpg files are supported!")
+        return
+    
+    try:
+        # Download the file
+        file_path = await input_message.download()
+        
+        # Send the file as a photo (no compression)
+        await message.reply_photo(
+            photo=file_path,
+            caption="📸 Here is your image!"
+        )
+        
+        # Clean up the downloaded file
+        os.remove(file_path)
+    except Exception as e:
+        await message.reply(f"❌ Error: {str(e)}")
 
                 
 @bot.on_message(filters.command(["t2t"]))
