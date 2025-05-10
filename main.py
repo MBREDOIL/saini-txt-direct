@@ -211,22 +211,23 @@ async def send_batch(message: Message):
 # Start command handler
 @bot.on_message(filters.command(["y2tt"]))
 async def start_handler(client, message: Message):
-    user_id = str(message.from_user.id)
-    user_data[user_id] = {}
-    
-    editable = await message.reply_text(
-        f"🔗 Please send a YouTube channel URL"
-    )
+    user_id = message.from_user.id
+    user_data[user_id] = {'state': STATE_IDLE}
+    await message.reply("🔗 Please send a YouTube channel URL")
 
-    input_message: Message = await bot.listen(message.chat.id)
-    link = input_message.text.strip()
-    await input_message.delete(True)
-    await editable.delete(True)
+# Handle YouTube URL input
+@bot.on_message(filters.text & ~filters.command)
+async def url_handler(client, message: Message):
+    user_id = message.from_user.id
+    data = user_data.get(user_id, {})
+    
+    if data.get('state') != STATE_IDLE:
+        return
     
     try:
         # Extract content from YouTube URL
         ydl = yt_dlp.YoutubeDL({'extract_flat': True, 'quiet': True, 'playlistend': 20000})
-        result = ydl.extract_info(link, download=False)
+        result = ydl.extract_info(message.text.strip(), download=False)
         entries = result.get('entries', [])
         
         # Categorize content
@@ -242,7 +243,7 @@ async def start_handler(client, message: Message):
         # Store content and stats
         data['content'] = content_types
         data['stats'] = {k: len(v) for k, v in content_types.items()}
-        data['state'] = link
+        data['state'] = STATE_WAITING_FOR_TYPE
         
         # Send inline keyboard for content type selection
         await message.reply(
