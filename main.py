@@ -218,6 +218,7 @@ async def start_handler(client, message: Message):
     if not input_message.text:
         await message.reply_text("🚨 **error**: Send valid text data")
         return
+    link = input_message.text.strip()
 
     data = user_data.get(user_id, {})
     
@@ -227,7 +228,7 @@ async def start_handler(client, message: Message):
     try:
         # Extract content from YouTube URL
         ydl = yt_dlp.YoutubeDL({'extract_flat': True, 'quiet': True, 'playlistend': 20000})
-        result = ydl.extract_info(message.text.strip(), download=False)
+        result = ydl.extract_info(link, download=False)
         entries = result.get('entries', [])
         
         # Categorize content
