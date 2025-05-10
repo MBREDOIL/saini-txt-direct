@@ -221,7 +221,7 @@ async def start_handler(client, message: Message):
 
     data = user_data.get(user_id, {})
     
-    elif data.get('state') != STATE_IDLE:
+    if data.get('state') != STATE_IDLE:
         return
     
     try:
