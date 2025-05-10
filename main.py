@@ -212,6 +212,7 @@ async def send_batch(message: Message):
 @bot.on_message(filters.command(["y2tt"]))
 async def start_handler(client, message: Message):
     user_id = str(message.from_user.id)
+    user_data[user_id] = {}
     
     editable = await message.reply_text(
         f"🔗 Please send a YouTube channel URL"
@@ -241,7 +242,7 @@ async def start_handler(client, message: Message):
         # Store content and stats
         data['content'] = content_types
         data['stats'] = {k: len(v) for k, v in content_types.items()}
-        data['state'] = STATE_WAITING_FOR_TYPE
+        data['state'] = link
         
         # Send inline keyboard for content type selection
         await message.reply(
