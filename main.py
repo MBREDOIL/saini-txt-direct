@@ -28,16 +28,23 @@ from aiohttp import web
 import random
 from pyromod import listen
 from pyrogram import Client, filters
-from pyrogram.types import Message
 from pyrogram.errors import FloodWait
 from pyrogram.errors.exceptions.bad_request_400 import StickerEmojiInvalid
 from pyrogram.types.messages_and_media import message
-from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from pyrogram.types import Message, InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery
 import aiohttp
 import aiofiles
 import zipfile
 import shutil
 import ffmpeg
+
+import csv
+from collections import defaultdict
+
+STATE_IDLE = 0
+STATE_WAITING_FOR_TYPE = 1
+STATE_WAITING_FOR_FORMAT = 2
+STATE_PROCESSING = 3
 
 # Initialize the bot
 bot = Client(
@@ -46,6 +53,9 @@ bot = Client(
     api_hash=API_HASH,
     bot_token=BOT_TOKEN
 )
+
+# Store user data in a dictionary
+user_data = defaultdict(dict)
 
 cookies_file_path = os.getenv("cookies_file_path", "youtube_cookies.txt")
 api_url = "http://master-api-v3.vercel.app/"
@@ -117,6 +127,194 @@ async def cookies_handler(client: Client, m: Message):
     except Exception as e:
         await m.reply_text(f"⚠️ An error occurred: {str(e)}")
 
+# Function to process YouTube content
+async def process_content(message: Message, entries, content_type, format_type):
+    try:
+        # Set batch size based on content type
+        batch_size = 1000 if content_type in ['videos', 'shorts'] else 10
+        chunks = [entries[i:i + batch_size] for i in range(0, len(entries), batch_size)]
+        
+        if not chunks:
+            await message.reply("❌ No content found!")
+            return
+        
+        # Store data for the user
+        user_data[message.from_user.id].update({
+            'chunks': chunks,
+            'current_chunk': 0,
+            'total': len(chunks),
+            'content_type': content_type,
+            'format': format_type,
+            'state': STATE_PROCESSING
+        })
+        
+        # Send the first batch
+        await send_batch(message)
+    except Exception as e:
+        await message.reply(f"❌ Error: {str(e)}")
+
+# Function to send a batch of content
+async def send_batch(message: Message):
+    user_id = message.from_user.id
+    data = user_data.get(user_id)
+    
+    if not data or data['current_chunk'] >= data['total']:
+        return
+    
+    chunk = data['chunks'][data['current_chunk']]
+    batch_num = data['current_chunk'] + 1
+    format_type = data['format']
+    
+    # Generate file based on selected format
+    if format_type == 'text':
+        content = []
+        for idx, item in enumerate(chunk, 1):
+            content.append(
+                f"📌 Item {idx}:\n"
+                f"Title: {item.get('title', 'No title')}\n"
+                f"URL: {item.get('url', 'No URL')}\n"
+                f"Thumbnail: {item.get('thumbnails', [{}])[-1].get('url', 'N/A')}\n"
+                "────────────────────"
+            )
+        filename = f"{data['content_type']}_batch_{batch_num}.txt"
+        with open(filename, 'w', encoding='utf-8') as f:
+            f.write('\n'.join(content))
+    elif format_type == 'csv':
+        filename = f"{data['content_type']}_batch_{batch_num}.csv"
+        with open(filename, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            writer.writerow(['Index', 'Title', 'URL', 'Thumbnail'])
+            for idx, item in enumerate(chunk, 1):
+                writer.writerow([idx, item.get('title', 'No title'), item.get('url', 'No URL'), item.get('thumbnails', [{}])[-1].get('url', 'N/A')])
+    elif format_type == 'json':
+        filename = f"{data['content_type']}_batch_{batch_num}.json"
+        with open(filename, 'w', encoding='utf-8') as f:
+            json.dump([{
+                'index': idx,
+                'title': item.get('title', 'No title'),
+                'url': item.get('url', 'No URL'),
+                'thumbnail': item.get('thumbnails', [{}])[-1].get('url', 'N/A')
+            } for idx, item in enumerate(chunk, 1)], f, indent=2)
+    
+    # Send the file with navigation buttons
+    await message.reply_document(
+        document=filename,
+        caption=f"📦 {data['content_type'].title()} Batch {batch_num}/{data['total']}\nTotal Items: {len(chunk)}",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("Next Batch", callback_data="next_batch")],
+            [InlineKeyboardButton("Cancel", callback_data="cancel")]
+        ])
+    )
+    os.remove(filename)  # Clean up the file after sending
+    data['current_chunk'] += 1
+
+# Start command handler
+@bot.on_message(filters.command(["y2tt"]))
+async def start_handler(client, message: Message):
+    user_id = str(message.from_user.id)
+    
+    editable = await message.reply_text(
+        f"🔗 Please send a YouTube channel URL"
+    )
+
+    input_message: Message = await bot.listen(message.chat.id)
+    link = input_message.text.strip()
+    await input_message.delete(True)
+    await editable.delete(True)
+    
+    try:
+        # Extract content from YouTube URL
+        ydl = yt_dlp.YoutubeDL({'extract_flat': True, 'quiet': True, 'playlistend': 20000})
+        result = ydl.extract_info(link, download=False)
+        entries = result.get('entries', [])
+        
+        # Categorize content
+        content_types = {'videos': [], 'shorts': [], 'playlists': []}
+        for entry in entries:
+            if entry.get('_type') == 'playlist':
+                content_types['playlists'].append(entry)
+            elif '/shorts/' in entry.get('url', ''):
+                content_types['shorts'].append(entry)
+            else:
+                content_types['videos'].append(entry)
+        
+        # Store content and stats
+        data['content'] = content_types
+        data['stats'] = {k: len(v) for k, v in content_types.items()}
+        data['state'] = STATE_WAITING_FOR_TYPE
+        
+        # Send inline keyboard for content type selection
+        await message.reply(
+            "📊 Available Content:\n\n"
+            f"1. Videos ({data['stats']['videos']})\n"
+            f"2. Shorts ({data['stats']['shorts']})\n"
+            f"3. Playlists ({data['stats']['playlists']})\n\n"
+            "Select a type:",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("Videos", callback_data="type_videos")],
+                [InlineKeyboardButton("Shorts", callback_data="type_shorts")],
+                [InlineKeyboardButton("Playlists", callback_data="type_playlists")]
+            ])
+        )
+    except Exception as e:
+        await message.reply(f"❌ Error: {str(e)}")
+        del user_data[user_id]
+
+# Handle button clicks (callbacks)
+@bot.on_callback_query()
+async def handle_callback(client, callback_query: CallbackQuery):
+    user_id = callback_query.from_user.id
+    data = user_data.get(user_id)
+    
+    if not data:
+        await callback_query.answer("No active process!")
+        return
+    
+    # Handle content type selection
+    if callback_query.data.startswith("type_"):
+        content_type = callback_query.data.split("_")[1]
+        if not data['content'][content_type]:
+            await callback_query.message.reply(f"❌ No {content_type} available!")
+            await callback_query.answer()
+            return
+        data['content_type'] = content_type
+        data['state'] = STATE_WAITING_FOR_FORMAT
+        # Send inline keyboard for format selection
+        await callback_query.message.reply(
+            "📄 Select format:",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("Text", callback_data="format_text")],
+                [InlineKeyboardButton("CSV", callback_data="format_csv")],
+                [InlineKeyboardButton("JSON", callback_data="format_json")]
+            ])
+        )
+        await callback_query.answer()
+    
+    # Handle format selection
+    elif callback_query.data.startswith("format_"):
+        format_type = callback_query.data.split("_")[1]
+        data['format'] = format_type
+        entries = data['content'][data['content_type']]
+        await process_content(callback_query.message, entries, data['content_type'], format_type)
+        await callback_query.answer()
+    
+    # Handle next batch request
+    elif callback_query.data == "next_batch":
+        if data['current_chunk'] < data['total']:
+            await send_batch(callback_query.message)
+        else:
+            await callback_query.message.reply("✅ All batches sent!")
+            await callback_query.answer("All batches have been sent!", show_alert=True)
+    
+    # Handle cancellation
+    elif callback_query.data == "cancel":
+        await callback_query.message.reply("✅ Operation cancelled!")
+        del user_data[user_id]
+        await callback_query.answer()
+
+
+
+                
 @bot.on_message(filters.command(["t2t"]))
 async def text_to_txt(client, message: Message):
     user_id = str(message.from_user.id)
