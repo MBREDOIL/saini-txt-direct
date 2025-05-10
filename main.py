@@ -214,14 +214,14 @@ async def start_handler(client, message: Message):
     user_id = message.from_user.id
     user_data[user_id] = {'state': STATE_IDLE}
     await message.reply("🔗 Please send a YouTube channel URL")
+    input_message: Message = await bot.listen(message.chat.id)
+    if not input_message.text:
+        await message.reply_text("🚨 **error**: Send valid text data")
+        return
 
-# Handle YouTube URL input
-@bot.on_message(filters.text & ~filters.command)
-async def url_handler(client, message: Message):
-    user_id = message.from_user.id
     data = user_data.get(user_id, {})
     
-    if data.get('state') != STATE_IDLE:
+    elif data.get('state') != STATE_IDLE:
         return
     
     try:
