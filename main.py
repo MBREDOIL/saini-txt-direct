@@ -57,6 +57,17 @@ bot = Client(
 # Store user data in a dictionary
 user_data = defaultdict(dict)
 
+# Dictionary to store user selections and state
+user_selections = {}
+
+# Mapping of link types to their file extensions
+type_to_extensions = {
+    "pdf": ["pdf"],
+    "video": ["mp4", "avi", "mkv"],
+    "image": ["jpg", "jpeg", "png", "gif"],
+    "archive": ["zip", "rar", "7z"],
+}
+
 cookies_file_path = os.getenv("cookies_file_path", "youtube_cookies.txt")
 api_url = "http://master-api-v3.vercel.app/"
 api_token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoiNzkxOTMzNDE5NSIsInRnX3VzZXJuYW1lIjoi4p61IFtvZmZsaW5lXSIsImlhdCI6MTczODY5MjA3N30.SXzZ1MZcvMp5sGESj0hBKSghhxJ3k1GTWoBUbivUe1I"
@@ -348,6 +359,331 @@ async def file_to_image_handler(client, message: Message):
         os.remove(file_path)
     except Exception as e:
         await message.reply(f"❌ Error: {str(e)}")
+
+
+
+
+# Handler for HTML file uploads
+@bot.on_message(filters.document & filters.regex(r".*\.html$"))
+async def handle_html_file(client, message):
+    chat_id = message.chat.id
+    
+    # Check if the user is already processing a file
+    if chat_id in user_selections:
+        await message.reply("Please complete the current selection or cancel it.")
+        return
+    
+    # Download the HTML file
+    file_path = await message.download()
+    
+    # Parse the HTML file using BeautifulSoup
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            soup = BeautifulSoup(f, "html.parser")
+    except Exception:
+        await message.reply("Error parsing HTML file.")
+        os.remove(file_path)
+        return
+    
+    # Extract all tables from the HTML
+    tables = []
+    for i, table in enumerate(soup.find_all("table")):
+        # Determine table name
+        caption = table.find("caption")
+        if caption:
+            name = caption.get_text().strip()
+        else:
+            preceding = table.find_previous(["h1", "h2", "h3", "h4"])
+            if preceding:
+                name = preceding.get_text().strip()
+            else:
+                name = f"Table {i+1}"
+        
+        rows = table.find_all("tr")
+        if not rows:
+            continue
+        
+        # Get number of columns from the first row
+        first_row = rows[0]
+        tds = first_row.find_all("td")
+        if not tds:
+            continue
+        num_columns = len(tds)
+        
+        # Extract data from all rows
+        data = []
+        for row in rows:
+            tds = row.find_all("td")
+            if not tds:
+                continue
+            texts = [td.get_text().strip() for td in tds]
+            link = row.find("a")
+            link_href = link["href"] if link else None
+            data.append({"texts": texts, "link": link_href})
+        
+        tables.append({"name": name, "data": data, "num_columns": num_columns})
+    
+    if not tables:
+        await message.reply("No tables found in the HTML file.")
+        os.remove(file_path)
+        return
+    
+    # Store table data and initialize user selections
+    user_selections[chat_id] = {
+        "tables": tables,
+        "selected_tables": [],
+        "selected_columns": [],
+        "selected_types": [],
+        "file_path": file_path,
+        "current_step": "table_selection",
+    }
+    
+    # Auto-select if only one table, otherwise show table selection
+    if len(tables) == 1:
+        user_selections[chat_id]["selected_tables"] = [0]
+        await show_column_selection(client, chat_id)
+    else:
+        await show_table_selection(client, chat_id)
+
+# Show table selection interface
+async def show_table_selection(client, chat_id):
+    state = user_selections[chat_id]
+    tables = state["tables"]
+    selected = state["selected_tables"]
+    
+    buttons = []
+    for i, table in enumerate(tables):
+        name = table["name"][:20]
+        rows = len(table["data"])
+        cols = table["num_columns"]
+        status = "x" if i in selected else " "
+        button_text = f"{name} ({rows}r, {cols}c) [{status}]"
+        button = InlineKeyboardButton(button_text, callback_data=f"toggle_table_{i}")
+        buttons.append([button])
+    buttons.append([InlineKeyboardButton("Done", callback_data="done_tables")])
+    buttons.append([InlineKeyboardButton("Cancel", callback_data="cancel")])
+    keyboard = InlineKeyboardMarkup(buttons)
+    
+    msg = await client.send_message(chat_id, "Select which tables to process:", reply_markup=keyboard)
+    state["table_message_id"] = msg.id
+
+# Update table selection interface
+async def update_table_selection(client, chat_id):
+    state = user_selections[chat_id]
+    tables = state["tables"]
+    selected = state["selected_tables"]
+    
+    buttons = []
+    for i, table in enumerate(tables):
+        name = table["name"][:20]
+        rows = len(table["data"])
+        cols = table["num_columns"]
+        status = "x" if i in selected else " "
+        button_text = f"{name} ({rows}r, {cols}c) [{status}]"
+        button = InlineKeyboardButton(button_text, callback_data=f"toggle_table_{i}")
+        buttons.append([button])
+    buttons.append([InlineKeyboardButton("Done", callback_data="done_tables")])
+    buttons.append([InlineKeyboardButton("Cancel", callback_data="cancel")])
+    keyboard = InlineKeyboardMarkup(buttons)
+    
+    await client.edit_message_reply_markup(chat_id, state["table_message_id"], reply_markup=keyboard)
+
+# Show column selection interface
+async def show_column_selection(client, chat_id):
+    state = user_selections[chat_id]
+    selected_tables = state["selected_tables"]
+    if not selected_tables:
+        return
+    num_columns = state["tables"][selected_tables[0]]["num_columns"]
+    selected_columns = state["selected_columns"]
+    
+    buttons = []
+    for i in range(num_columns):
+        status = "x" if i in selected_columns else " "
+        button = InlineKeyboardButton(f"Column {i+1} [{status}]", callback_data=f"toggle_column_{i}")
+        buttons.append([button])
+    buttons.append([InlineKeyboardButton("Done", callback_data="done_columns")])
+    buttons.append([InlineKeyboardButton("Cancel", callback_data="cancel")])
+    keyboard = InlineKeyboardMarkup(buttons)
+    
+    msg = await client.send_message(chat_id, "Select which columns to include:", reply_markup=keyboard)
+    state["column_message_id"] = msg.id
+
+# Update column selection interface
+async def update_column_selection(client, chat_id):
+    state = user_selections[chat_id]
+    selected_tables = state["selected_tables"]
+    if not selected_tables:
+        return
+    num_columns = state["tables"][selected_tables[0]]["num_columns"]
+    selected_columns = state["selected_columns"]
+    
+    buttons = []
+    for i in range(num_columns):
+        status = "x" if i in selected_columns else " "
+        button = InlineKeyboardButton(f"Column {i+1} [{status}]", callback_data=f"toggle_column_{i}")
+        buttons.append([button])
+    buttons.append([InlineKeyboardButton("Done", callback_data="done_columns")])
+    buttons.append([InlineKeyboardButton("Cancel", callback_data="cancel")])
+    keyboard = InlineKeyboardMarkup(buttons)
+    
+    await client.edit_message_reply_markup(chat_id, state["column_message_id"], reply_markup=keyboard)
+
+# Show link type selection interface
+async def show_type_selection(client, chat_id):
+    state = user_selections[chat_id]
+    types = ["pdf", "video", "image", "archive"]
+    selected_types = state["selected_types"]
+    
+    buttons = []
+    for type in types:
+        status = "x" if type in selected_types else " "
+        button = InlineKeyboardButton(f"{type.capitalize()} [{status}]", callback_data=f"toggle_type_{type}")
+        buttons.append([button])
+    buttons.append([InlineKeyboardButton("Done", callback_data="done_types")])
+    buttons.append([InlineKeyboardButton("Cancel", callback_data="cancel")])
+    keyboard = InlineKeyboardMarkup(buttons)
+    
+    msg = await client.send_message(chat_id, "Select which link types to include:", reply_markup=keyboard)
+    state["type_message_id"] = msg.id
+
+# Update link type selection interface
+async def update_type_selection(client, chat_id):
+    state = user_selections[chat_id]
+    types = ["pdf", "video", "image", "archive"]
+    selected_types = state["selected_types"]
+    
+    buttons = []
+    for type in types:
+        status = "x" if type in selected_types else " "
+        button = InlineKeyboardButton(f"{type.capitalize()} [{status}]", callback_data=f"toggle_type_{type}")
+        buttons.append([button])
+    buttons.append([InlineKeyboardButton("Done", callback_data="done_types")])
+    buttons.append([InlineKeyboardButton("Cancel", callback_data="cancel")])
+    keyboard = InlineKeyboardMarkup(buttons)
+    
+    await client.edit_message_reply_markup(chat_id, state["type_message_id"], reply_markup=keyboard)
+
+# Process selected data and send the output file
+async def process_and_send_file(client, chat_id):
+    state = user_selections[chat_id]
+    selected_tables_indices = state["selected_tables"]
+    selected_columns = state["selected_columns"]
+    selected_types = state["selected_types"]
+    
+    # Compile all allowed file extensions
+    allowed_extensions = set()
+    for type in selected_types:
+        allowed_extensions.update(type_to_extensions.get(type, []))
+    
+    # Generate output lines
+    output_lines = []
+    for table_index in selected_tables_indices:
+        table = state["tables"][table_index]
+        output_lines.append(f"Table: {table['name']}")
+        for row in table["data"]:
+            link = row["link"]
+            if link:
+                ext = os.path.splitext(link)[1][1:].lower()
+                if ext in allowed_extensions:
+                    texts = [row["texts"][i] for i in selected_columns if i < len(row["texts"])]
+                    if texts:
+                        line = " ".join(texts) + " " + link
+                        output_lines.append(line)
+    
+    if not output_lines:
+        await client.send_message(chat_id, "No matching data found.")
+    else:
+        # Write output to a text file
+        txt_file_path = f"output_{chat_id}.txt"
+        with open(txt_file_path, "w", encoding="utf-8") as f:
+            for line in output_lines:
+                f.write(line + "\n")
+        
+        # Send the file to the user
+        await client.send_document(chat_id, txt_file_path)
+        os.remove(txt_file_path)
+    
+    # Clean up temporary files and state
+    os.remove(state["file_path"])
+    del user_selections[chat_id]
+
+# Handle inline button interactions
+@app.on_callback_query()
+async def handle_callback_query(client, callback_query):
+    chat_id = callback_query.message.chat.id
+    data = callback_query.data
+    
+    if chat_id not in user_selections:
+        await callback_query.answer("Session expired. Please send the HTML file again.")
+        return
+    
+    state = user_selections[chat_id]
+    
+    # Handle cancel action
+    if data == "cancel":
+        await client.send_message(chat_id, "Operation cancelled.")
+        os.remove(state["file_path"])
+        del user_selections[chat_id]
+        await callback_query.answer()
+        return
+    
+    # Table selection step
+    if state["current_step"] == "table_selection":
+        if data.startswith("toggle_table_"):
+            table_index = int(data.split("_")[2])
+            if table_index in state["selected_tables"]:
+                state["selected_tables"].remove(table_index)
+            else:
+                state["selected_tables"].append(table_index)
+            await update_table_selection(client, chat_id)
+        elif data == "done_tables":
+            if not state["selected_tables"]:
+                await callback_query.answer("Please select at least one table.")
+                return
+            selected_tables = [state["tables"][i] for i in state["selected_tables"]]
+            num_columns_set = set(table["num_columns"] for table in selected_tables)
+            if len(num_columns_set) > 1:
+                await callback_query.answer("Selected tables have different numbers of columns. Please select tables with the same structure.")
+                return
+            state["current_step"] = "column_selection"
+            await show_column_selection(client, chat_id)
+        await callback_query.answer()
+    
+    # Column selection step
+    elif state["current_step"] == "column_selection":
+        if data.startswith("toggle_column_"):
+            column_index = int(data.split("_")[2])
+            if column_index in state["selected_columns"]:
+                state["selected_columns"].remove(column_index)
+            else:
+                state["selected_columns"].append(column_index)
+            await update_column_selection(client, chat_id)
+        elif data == "done_columns":
+            if not state["selected_columns"]:
+                await callback_query.answer("Please select at least one column.")
+                return
+            state["current_step"] = "type_selection"
+            await show_type_selection(client, chat_id)
+        await callback_query.answer()
+    
+    # Link type selection step
+    elif state["current_step"] == "type_selection":
+        if data.startswith("toggle_type_"):
+            type_name = data.split("_")[2]
+            if type_name in state["selected_types"]:
+                state["selected_types"].remove(type_name)
+            else:
+                state["selected_types"].append(type_name)
+            await update_type_selection(client, chat_id)
+        elif data == "done_types":
+            if not state["selected_types"]:
+                await callback_query.answer("Please select at least one type.")
+                return
+            await process_and_send_file(client, chat_id)
+        await callback_query.answer()
+
+
 
                 
 @bot.on_message(filters.command(["t2t"]))
@@ -642,7 +978,7 @@ async def txt_handler(bot: Client, m: Message):
     raw_text3 = input3.text
     await input3.delete(True)
     if raw_text3 == '1':
-        CR = '[**❤️ YOUR FRIEND ❤️**](https://t.me/UIHASH)'
+        CR = "[**❤️ YOUR FRIEND ❤️**](https://t.me/UIHASH)"
     else:
         CR = raw_text3
 
@@ -759,7 +1095,8 @@ async def txt_handler(bot: Client, m: Message):
 
             try:
                 cc = f'✦ {str(count).zfill(3)}. **🎞️ Title :** `{name1}`.mkv\n\n**📚 Course :** {b_name}\n\n**🌟 Extracted By :** {CR}'
-                cc1 = f'✦ {str(count).zfill(3)}. **📁 Title :** `{name1}`.pdf\n\n**📚 Course :** {b_name}\n\n**🌟 Extracted By :** {CR}'
+                cc1 = f'✦ {str(count).zfill(3)}. **📁 Title :** `{name1}`.pdf\n\n**🌐 {b_name}**\n\n**🌟 Uploaded By :** {CR}'
+                #cc1 = f'✦ {str(count).zfill(3)}. **📁 Title :** `{name1}`.pdf\n\n**📚 Course :** {b_name}\n\n**🌟 Extracted By :** {CR}'
                 cczip = f'✦ {str(count).zfill(3)}. **📁 Title :** `{name1}`.zip\n\n**📚 Course :** {b_name}\n\n**🌟 Extracted By :** {CR}'
                 ccimg = f'✦ {str(count).zfill(3)}. **🖼️ Title :** `{name1}`.jpg\n\n**📚 Course :** {b_name}\n\n**🌟 Extracted By :** {CR}'
                 ccm = f'✦ {str(count).zfill(3)}. **🎵 Title :** `{name1}`.mp3\n\n**📚 Course :** {b_name}\n\n**🌟 Extracted By :** {CR}'
