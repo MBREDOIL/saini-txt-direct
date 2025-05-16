@@ -609,7 +609,7 @@ async def process_and_send_file(client, chat_id):
     del user_selections[chat_id]
 
 # Handle inline button interactions
-@app.on_callback_query()
+@bot.on_callback_query()
 async def handle_callback_query(client, callback_query):
     chat_id = callback_query.message.chat.id
     data = callback_query.data
